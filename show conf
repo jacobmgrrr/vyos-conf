@@ -1,0 +1,382 @@
+firewall {
+    all-ping enable
+    broadcast-ping disable
+    config-trap disable
+    ipv6-receive-redirects disable
+    ipv6-src-route disable
+    ip-src-route disable
+    log-martians enable
+    name OUTSIDE-IN {
+        default-action drop
+        rule 10 {
+            action accept
+            state {
+                established enable
+                related enable
+            }
+        }
+        rule 11 {
+            action accept
+            source {
+                address <vpn-subnet>
+            }
+        }
+    }
+    name OUTSIDE-LOCAL {
+        default-action drop
+        rule 10 {
+            action accept
+            state {
+                established enable
+                related enable
+            }
+        }
+        rule 11 {
+            action accept
+            source {
+                address <vpn-subnet>
+            }
+        }
+        rule 30 {
+            action drop
+            destination {
+                port 22
+            }
+            protocol tcp
+            recent {
+                count 6
+                time 120
+            }
+            state {
+                new enable
+            }
+        }
+        rule 31 {
+            action accept
+            destination {
+                port 22
+            }
+            protocol tcp
+            state {
+                new enable
+            }
+        }
+    }
+    receive-redirects disable
+    send-redirects enable
+    source-validation disable
+    syn-cookies enable
+    twa-hazards-protection disable
+}
+interfaces {
+    ethernet eth0 {
+        address <lan1-gwip>/24
+        description lan1
+    }
+    ethernet eth1 {
+        address <lan2-gwip>/24
+        description lan2
+    }
+    ethernet eth2 {
+        address dhcp
+        description wan1
+        firewall {
+            in {
+                name OUTSIDE-IN
+            }
+            local {
+                name OUTSIDE-LOCAL
+            }
+        }
+        traffic-policy {
+            out fq-codel-shaper
+        }
+    }
+    ethernet eth3 {
+        address dhcp
+        description wan2
+        firewall {
+            in {
+                name OUTSIDE-IN
+            }
+            local {
+                name OUTSIDE-LOCAL
+            }
+        }
+    }
+    loopback lo {
+    }
+}
+load-balancing {
+    wan {
+        enable-local-traffic
+        flush-connections
+        interface-health eth2 {
+            failure-count 3
+            nexthop dhcp
+            success-count 2
+            test 10 {
+                resp-time 5
+                target <wan1-gateway>
+                ttl-limit 1
+                type ping
+            }
+        }
+        interface-health eth3 {
+            failure-count 3
+            nexthop dhcp
+            success-count 2
+            test 10 {
+                resp-time 5
+                target <wan2-gateway>
+                ttl-limit 1
+                type ping
+            }
+        }
+        rule 10 {
+            destination {
+                address <subnet=lan1&2>
+            }
+            exclude
+            inbound-interface eth+
+        }
+        rule 20 {
+            inbound-interface eth0
+            interface eth2 {
+            }
+        }
+        rule 30 {
+            inbound-interface eth1
+            interface eth3 {
+            }
+            source {
+                address <lan2-subnet>
+            }
+        }
+        rule 40 {
+            inbound-interface eth0
+            interface eth3 {
+            }
+        }
+    }
+}
+nat {
+    destination {
+        rule 100 {
+            destination {
+                address <lan1-subnet>
+            }
+            exclude
+            inbound-interface eth2
+            source {
+                address <vpn-subnet>
+            }
+        }
+    }
+    source {
+        rule 90 {
+            destination {
+                address <vpn-subnet>
+            }
+            exclude
+            outbound-interface eth2
+            source {
+                address <lan1-subnet>
+            }
+        }
+        rule 100 {
+            outbound-interface eth2
+            source {
+                address <lan1-subnet>
+            }
+            translation {
+                address masquerade
+            }
+        }
+        rule 110 {
+            outbound-interface eth2
+            source {
+                address <lan2-subnet>
+            }
+            translation {
+                address masquerade
+            }
+        }
+        rule 200 {
+            outbound-interface eth3
+            source {
+                address <lan1-subnet>
+            }
+            translation {
+                address masquerade
+            }
+        }
+        rule 210 {
+            outbound-interface eth3
+            source {
+                address <lan2-subnet>
+            }
+            translation {
+                address masquerade
+            }
+        }
+    }
+}
+protocols {
+    static {
+        route 0.0.0.0/0 {
+            dhcp-interface eth2
+        }
+        table 10 {
+            route 0.0.0.0/0 {
+                dhcp-interface eth3
+            }
+        }
+    }
+}
+service {
+    ssh {
+        disable-password-authentication
+        port 22
+    }
+}
+system {
+    config-management {
+        commit-revisions 100
+    }
+    conntrack {
+        modules {
+            ftp
+            h323
+            nfs
+            pptp
+            sip
+            sqlnet
+            tftp
+        }
+    }
+    console {
+        device ttyS0 {
+            speed 115200
+        }
+    }
+    host-name smvyo
+    login {
+        user <username> {
+            authentication {
+                encrypted-password ****************
+                public-keys <username>@vyos {
+                    key ****************
+                    type ssh-rsa
+                }
+            }
+        }
+    }
+    name-server <nameserver>
+    ntp {
+        server 0.pool.ntp.org {
+        }
+        server 1.pool.ntp.org {
+        }
+        server 2.pool.ntp.org {
+        }
+        server 3.pool.ntp.org {
+        }
+    }
+    syslog {
+        global {
+            facility all {
+                level info
+            }
+            facility protocols {
+                level debug
+            }
+        }
+    }
+    time-zone America/New_York
+}
+traffic-policy {
+    shaper fq-codel-shaper {
+        bandwidth 1024mbit
+        class 10 {
+            bandwidth 90%
+            burst 1mbit
+            ceiling 100%
+            match filter-4 {
+                ip {
+                    protocol tcp
+                }
+            }
+            match filter-6 {
+                ipv6 {
+                    protocol tcp
+                }
+            }
+            queue-type fq-codel
+        }
+        default {
+            bandwidth 90%
+            burst 10mbit
+            ceiling 100%
+            queue-type fq-codel
+        }
+    }
+}
+vpn {
+    ipsec {
+        esp-group esp_swan {
+            compression disable
+            lifetime 3600
+            mode tunnel
+            pfs dh-group19
+            proposal 10 {
+                encryption aes256gcm128
+                hash sha256
+            }
+        }
+        ike-group ikev2_swan {
+            close-action none
+            dead-peer-detection {
+                action restart
+                interval 30
+                timeout 120
+            }
+            ikev2-reauth no
+            key-exchange ikev2
+            lifetime 28800
+            proposal 10 {
+                dh-group 19
+                encryption aes256gcm128
+                hash sha256
+            }
+        }
+        ipsec-interfaces {
+            interface eth2
+        }
+        site-to-site {
+            peer <vpn-ip> {
+                authentication {
+                    id <wan1-ip>
+                    mode pre-shared-secret
+                    pre-shared-secret ****************
+                    remote-id <vpn-fqdn>
+                }
+                connection-type initiate
+                ike-group ikev2_swan
+                ikev2-reauth inherit
+                local-address <wan1-ip>
+                tunnel 0 {
+                    allow-nat-networks disable
+                    allow-public-networks disable
+                    esp-group esp_swan
+                    local {
+                        prefix <lan1-subnet>
+                    }
+                    remote {
+                        prefix <vpn-subnet>
+                    }
+                }
+            }
+        }
+    }
+}
